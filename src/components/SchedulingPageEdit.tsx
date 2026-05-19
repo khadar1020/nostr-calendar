@@ -40,6 +40,7 @@ import type {
 } from "../utils/types";
 import { ROUTES } from "../utils/routingHelper";
 import { useIntl } from "react-intl";
+import { resolveAttachedFormReference } from "../utils/bookingForms";
 
 const DAY_NAMES = dayjs.weekdays();
 
@@ -100,6 +101,8 @@ type SchedulingFormData = Pick<
 > & {
   eventTitle: string;
   image: string;
+  formUrl: string;
+  formTitle: string;
 };
 
 const DEFAULT_FORM_DATA: SchedulingFormData = {
@@ -108,6 +111,8 @@ const DEFAULT_FORM_DATA: SchedulingFormData = {
   description: "",
   location: "",
   image: "",
+  formUrl: "",
+  formTitle: "",
   slotDurations: [30],
   blockedDates: [],
   maxAdvance: 2592000,
@@ -201,6 +206,8 @@ export const SchedulingPageEdit = () => {
       description: existingPage.description,
       location: existingPage.location,
       image: existingPage.image || "",
+      formUrl: existingPage.attachedForm?.formUrl || "",
+      formTitle: existingPage.attachedForm?.formTitle || "",
       slotDurations:
         existingPage.slotDurations.length > 0
           ? existingPage.slotDurations
@@ -274,6 +281,12 @@ export const SchedulingPageEdit = () => {
   const handleSave = async () => {
     setProcessing(true);
     try {
+      const attachedForm = formData.formUrl.trim()
+        ? await resolveAttachedFormReference(
+            formData.formUrl,
+            formData.formTitle || undefined,
+          )
+        : undefined;
       // Auto-detect the host's timezone from the browser. The host enters
       // availability windows like "09:00" thinking in their own local time;
       // storing that timezone alongside lets viewers in any other timezone
@@ -295,6 +308,7 @@ export const SchedulingPageEdit = () => {
         durationMode: "fixed",
         eventTitle: formData.eventTitle || undefined,
         image: formData.image || undefined,
+        attachedForm,
         slotDurations: formData.slotDurations,
         availabilityWindows: buildAvailabilityWindows(),
       };
@@ -559,6 +573,58 @@ export const SchedulingPageEdit = () => {
               value={formData.image}
               onChange={(e) => updateField("image", e.target.value)}
               size="small"
+            />
+          </Box>
+        </Paper>
+
+        {/* Attached Form */}
+        <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
+          <Box
+            sx={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              mb: 2,
+              gap: 1,
+            }}
+          >
+            <Box>
+              <Typography variant="subtitle1">Form</Typography>
+              <Typography variant="body2" color="text.secondary">
+                Attach a Formstr form that bookers must complete before they
+                can request this page.
+              </Typography>
+            </Box>
+            {formData.formUrl ? (
+              <Button
+                size="small"
+                color="inherit"
+                onClick={() => {
+                  updateField("formUrl", "");
+                  updateField("formTitle", "");
+                }}
+              >
+                Remove
+              </Button>
+            ) : null}
+          </Box>
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            <TextField
+              fullWidth
+              label="Formstr form URL or naddr"
+              placeholder="https://formstr.app/f/naddr1..."
+              value={formData.formUrl}
+              onChange={(e) => updateField("formUrl", e.target.value)}
+              size="small"
+            />
+            <TextField
+              fullWidth
+              label="Form label (optional)"
+              placeholder="Intake form"
+              value={formData.formTitle}
+              onChange={(e) => updateField("formTitle", e.target.value)}
+              size="small"
+              helperText="Used as a fallback if the form title cannot be fetched."
             />
           </Box>
         </Paper>

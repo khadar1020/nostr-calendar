@@ -47,12 +47,18 @@ import { useCalendarLists } from "../stores/calendarLists";
 import { buildEventRef } from "../utils/calendarListTypes";
 import { Header, HEADER_HEIGHT } from "./Header";
 import { CalendarListSelect } from "./CalendarListSelect";
+import {
+  BookingFormRenderer,
+  type BookingFormRenderState,
+} from "./BookingFormRenderer";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
 import { nip44, getPublicKey } from "nostr-tools";
 import { hexToBytes } from "@noble/hashes/utils.js";
 import type { Event, Filter } from "nostr-tools";
 import type {
+  IAttachedFormRef,
+  IFormResponseSnapshot,
   ISchedulingPage,
   ITimeSlot,
   IOutgoingBooking,
@@ -80,6 +86,8 @@ async function sendBookingRequest({
   note,
   dTag,
   relayHints,
+  attachedForm,
+  formResponse,
 }: {
   schedulingPageRef: string;
   creatorPubkey: string;
@@ -89,22 +97,32 @@ async function sendBookingRequest({
   note: string;
   dTag: string;
   relayHints?: string[];
+  attachedForm?: IAttachedFormRef;
+  formResponse?: IFormResponseSnapshot;
 }): Promise<Event> {
   const userPublicKey = await getUserPublicKey();
+  const tags: string[][] = [
+    ["a", schedulingPageRef],
+    ["start", String(Math.floor(start / 1000))],
+    ["end", String(Math.floor(end / 1000))],
+    ["title", title],
+    ["note", note],
+    ["d", dTag],
+  ];
+  if (attachedForm?.formId) tags.push(["form_id", attachedForm.formId]);
+  if (attachedForm?.formTitle) tags.push(["form_title", attachedForm.formTitle]);
+  if (attachedForm?.formUrl) tags.push(["form_url", attachedForm.formUrl]);
+
   const giftWrap = await nip59.wrapEvent(
     {
       pubkey: userPublicKey,
       created_at: Math.floor(Date.now() / 1000),
       kind: EventKinds.BookingRequestRumor,
-      content: "",
-      tags: [
-        ["a", schedulingPageRef],
-        ["start", String(Math.floor(start / 1000))],
-        ["end", String(Math.floor(end / 1000))],
-        ["title", title],
-        ["note", note],
-        ["d", dTag],
-      ],
+      content:
+        attachedForm || formResponse
+          ? JSON.stringify({ attachedForm, formResponse })
+          : "",
+      tags,
     },
     creatorPubkey,
     EventKinds.BookingRequestGiftWrap,
@@ -136,6 +154,11 @@ export const BookingPage = () => {
   const [bookingNote, setBookingNote] = useState("");
   const [bookingTitle, setBookingTitle] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [bookingFormState, setBookingFormState] =
+    useState<BookingFormRenderState>({
+      loading: false,
+      isComplete: false,
+    });
   const [snackbar, setSnackbar] = useState<{
     open: boolean;
     message: string;
@@ -276,11 +299,25 @@ export const BookingPage = () => {
       return;
     }
     setSelectedSlot(slot);
+    setBookingFormState({
+      loading: Boolean(page?.attachedForm),
+      isComplete: !page?.attachedForm,
+    });
     setBookingDialogOpen(true);
   };
 
   const handleBookingSubmit = async () => {
     if (!selectedSlot || !page || !naddr) return;
+    if (page.attachedForm && !bookingFormState.snapshot) {
+      setSnackbar({
+        open: true,
+        message:
+          bookingFormState.error ||
+          "Complete the attached form before requesting the booking.",
+        severity: "error",
+      });
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -306,6 +343,8 @@ export const BookingPage = () => {
         note: bookingNote,
         dTag,
         relayHints,
+        attachedForm: page.attachedForm,
+        formResponse: bookingFormState.snapshot,
       });
 
       // Add a placeholder event reference to the booker's calendar list.
@@ -335,6 +374,8 @@ export const BookingPage = () => {
         sentAt: Date.now(),
         status: "pending",
         dTag,
+        attachedForm: page.attachedForm,
+        formResponse: bookingFormState.snapshot,
       };
       useBookingRequests.getState().addOutgoingBooking(outgoing);
 
@@ -342,6 +383,7 @@ export const BookingPage = () => {
       setSelectedSlot(null);
       setBookingTitle("");
       setBookingNote("");
+      setBookingFormState({ loading: false, isComplete: false });
       setSnackbar({
         open: true,
         message: intl.formatMessage({ id: "scheduling.bookingRequestSent" }),
@@ -600,7 +642,10 @@ export const BookingPage = () => {
       {/* Booking Confirmation Dialog */}
       <Dialog
         open={bookingDialogOpen}
-        onClose={() => setBookingDialogOpen(false)}
+        onClose={() => {
+          setBookingDialogOpen(false);
+          setBookingFormState({ loading: false, isComplete: false });
+        }}
         maxWidth="sm"
         fullWidth
       >
@@ -647,17 +692,34 @@ export const BookingPage = () => {
                 onChange={setSelectedCalendarId}
                 label={intl.formatMessage({ id: "scheduling.addToCalendar" })}
               />
+              {page.attachedForm ? (
+                <BookingFormRenderer
+                  attachedForm={page.attachedForm}
+                  onStateChange={setBookingFormState}
+                />
+              ) : null}
             </Box>
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setBookingDialogOpen(false)} color="inherit">
+          <Button
+            onClick={() => {
+              setBookingDialogOpen(false);
+              setBookingFormState({ loading: false, isComplete: false });
+            }}
+            color="inherit"
+          >
             {intl.formatMessage({ id: "navigation.cancel" })}
           </Button>
           <Button
             variant="contained"
             onClick={handleBookingSubmit}
-            disabled={submitting || !selectedCalendarId}
+            disabled={
+              submitting ||
+              !selectedCalendarId ||
+              bookingFormState.loading ||
+              (Boolean(page?.attachedForm) && !bookingFormState.isComplete)
+            }
           >
             {submitting
               ? intl.formatMessage({ id: "scheduling.sending" })
