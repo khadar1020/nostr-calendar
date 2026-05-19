@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { nostrEventToCalendar } from "./parser";
+import {
+  nostrEventToCalendar,
+  nostrEventToSchedulingPage,
+  schedulingPageToTags,
+} from "./parser";
 import { Event } from "nostr-tools";
+import type { ISchedulingPage } from "./types";
 
 function makeNostrEvent(overrides: Partial<Event> = {}): Event {
   return {
@@ -233,5 +238,92 @@ describe("nostrEventToCalendar", () => {
     expect(result.reference).toEqual(["https://nostr.com"]);
     expect(result.image).toBe("https://img.com/pic.png");
     expect(result.repeat.rrule).toBe("FREQ=DAILY");
+  });
+
+  it("parses booking form metadata and form responses", () => {
+    const event = makeNostrEvent({
+      tags: [
+        ["booking_form_id", "naddr1form"],
+        ["booking_form_title", "Intake form"],
+        ["booking_form_url", "https://formstr.app/f/naddr1form"],
+        [
+          "booking_form_response",
+          JSON.stringify({
+            submittedAt: 1700000000000,
+            answers: [{ fieldId: "q1", label: "Company", value: "Formstr" }],
+          }),
+        ],
+      ],
+    });
+
+    const result = nostrEventToCalendar(event);
+    expect(result.attachedForm).toEqual({
+      formId: "naddr1form",
+      formTitle: "Intake form",
+      formUrl: "https://formstr.app/f/naddr1form",
+    });
+    expect(result.formResponse).toEqual({
+      submittedAt: 1700000000000,
+      answers: [{ fieldId: "q1", label: "Company", value: "Formstr" }],
+    });
+  });
+});
+
+describe("scheduling page form metadata", () => {
+  it("parses an attached form from scheduling page tags", () => {
+    const event = makeNostrEvent({
+      kind: 31927,
+      tags: [
+        ["d", "page-1"],
+        ["title", "Book with me"],
+        ["duration_mode", "fixed"],
+        ["timezone", "UTC"],
+        ["slot_duration", "30"],
+        ["form_id", "naddr1form"],
+        ["form_title", "Intake form"],
+        ["form_url", "https://formstr.app/f/naddr1form"],
+      ],
+    });
+
+    const page = nostrEventToSchedulingPage(event);
+    expect(page.attachedForm).toEqual({
+      formId: "naddr1form",
+      formTitle: "Intake form",
+      formUrl: "https://formstr.app/f/naddr1form",
+    });
+  });
+
+  it("serializes attached form tags when present", () => {
+    const page: ISchedulingPage = {
+      id: "page-1",
+      eventId: "event-id",
+      user: "pubkey-abc",
+      title: "Book with me",
+      description: "",
+      slotDurations: [30],
+      durationMode: "fixed",
+      availabilityWindows: [],
+      blockedDates: [],
+      timezone: "UTC",
+      minNotice: 0,
+      maxAdvance: 2592000,
+      buffer: 900,
+      expiry: 0,
+      location: "",
+      createdAt: 1700000000,
+      attachedForm: {
+        formId: "naddr1form",
+        formTitle: "Intake form",
+        formUrl: "https://formstr.app/f/naddr1form",
+      },
+    };
+
+    const tags = schedulingPageToTags(page);
+    expect(tags).toContainEqual(["form_id", "naddr1form"]);
+    expect(tags).toContainEqual(["form_title", "Intake form"]);
+    expect(tags).toContainEqual([
+      "form_url",
+      "https://formstr.app/f/naddr1form",
+    ]);
   });
 });

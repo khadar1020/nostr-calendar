@@ -38,6 +38,23 @@ export type NotificationPreference = "enabled" | "disabled";
 export type RelayLineStatus = "pending" | "ok" | "error";
 export type RelayStatusMap = Record<string, RelayLineStatus>;
 
+export interface IAttachedFormRef {
+  formId: string;
+  formTitle?: string;
+  formUrl: string;
+}
+
+export interface IFormResponseAnswer {
+  fieldId: string;
+  label: string;
+  value: string | string[] | number | boolean | null;
+}
+
+export interface IFormResponseSnapshot {
+  submittedAt: number;
+  answers: IFormResponseAnswer[];
+}
+
 export interface ICalendarEvent {
   begin: number;
   description: string;
@@ -68,6 +85,8 @@ export interface ICalendarEvent {
    * If undefined, calendar-list preference should be used as fallback.
    */
   notificationPreference?: NotificationPreference;
+  attachedForm?: IAttachedFormRef;
+  formResponse?: IFormResponseSnapshot;
   calendarId?: string;
   isInvitation?: boolean;
   relayHint?: string;
@@ -140,6 +159,8 @@ export interface ISchedulingPage {
   viewKey?: string;
   /** Nostr event created_at */
   createdAt: number;
+  /** Optional attached Formstr form */
+  attachedForm?: IAttachedFormRef;
 }
 
 export type BookingRequestStatus =
@@ -176,6 +197,10 @@ export interface IBookingRequest {
   respondedAt?: number;
   /** Decline reason from creator */
   declineReason?: string;
+  /** Optional attached form metadata from the scheduling page */
+  attachedForm?: IAttachedFormRef;
+  /** Snapshot of the submitted answers */
+  formResponse?: IFormResponseSnapshot;
 }
 
 export interface IOutgoingBooking {
@@ -209,6 +234,10 @@ export interface IOutgoingBooking {
   dTag?: string;
   /** View key for created private event (on approval) */
   viewKey?: string;
+  /** Optional attached form metadata from the scheduling page */
+  attachedForm?: IAttachedFormRef;
+  /** Snapshot of the submitted answers */
+  formResponse?: IFormResponseSnapshot;
 }
 
 /** A concrete bookable time slot */

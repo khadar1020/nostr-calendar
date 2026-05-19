@@ -82,6 +82,40 @@ export const nostrEventToCalendar = (
           parsedEvent.notificationPreference = value;
         }
         break;
+      case "booking_form_id":
+        parsedEvent.attachedForm = {
+          ...(parsedEvent.attachedForm || {
+            formId: "",
+            formUrl: "",
+          }),
+          formId: value,
+        };
+        break;
+      case "booking_form_title":
+        parsedEvent.attachedForm = {
+          ...(parsedEvent.attachedForm || {
+            formId: "",
+            formUrl: "",
+          }),
+          formTitle: value,
+        };
+        break;
+      case "booking_form_url":
+        parsedEvent.attachedForm = {
+          ...(parsedEvent.attachedForm || {
+            formId: "",
+            formUrl: "",
+          }),
+          formUrl: value,
+        };
+        break;
+      case "booking_form_response":
+        try {
+          parsedEvent.formResponse = JSON.parse(value);
+        } catch {
+          parsedEvent.formResponse = undefined;
+        }
+        break;
       case "L":
         switch (value) {
           case "rrule":
@@ -183,6 +217,24 @@ export const nostrEventToSchedulingPage = (event: Event): ISchedulingPage => {
       case "event_title":
         page.eventTitle = values[0];
         break;
+      case "form_id":
+        page.attachedForm = {
+          ...(page.attachedForm || { formId: "", formUrl: "" }),
+          formId: values[0],
+        };
+        break;
+      case "form_title":
+        page.attachedForm = {
+          ...(page.attachedForm || { formId: "", formUrl: "" }),
+          formTitle: values[0],
+        };
+        break;
+      case "form_url":
+        page.attachedForm = {
+          ...(page.attachedForm || { formId: "", formUrl: "" }),
+          formUrl: values[0],
+        };
+        break;
       case "relay":
         page.relayHints!.push(values[0]);
         break;
@@ -249,6 +301,18 @@ export const schedulingPageToTags = (page: ISchedulingPage): string[][] => {
 
   if (page.eventTitle) {
     tags.push(["event_title", page.eventTitle]);
+  }
+
+  if (page.attachedForm?.formId) {
+    tags.push(["form_id", page.attachedForm.formId]);
+  }
+
+  if (page.attachedForm?.formTitle) {
+    tags.push(["form_title", page.attachedForm.formTitle]);
+  }
+
+  if (page.attachedForm?.formUrl) {
+    tags.push(["form_url", page.attachedForm.formUrl]);
   }
 
   // Add relay hints so consumers know where to find this event
