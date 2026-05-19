@@ -137,6 +137,22 @@ async function preparePrivateCalendarEvent(
     eventData.push(["notification", event.notificationPreference]);
   }
 
+  if (event.attachedForm?.formId) {
+    eventData.push(["booking_form_id", event.attachedForm.formId]);
+  }
+  if (event.attachedForm?.formTitle) {
+    eventData.push(["booking_form_title", event.attachedForm.formTitle]);
+  }
+  if (event.attachedForm?.formUrl) {
+    eventData.push(["booking_form_url", event.attachedForm.formUrl]);
+  }
+  if (event.formResponse) {
+    eventData.push([
+      "booking_form_response",
+      JSON.stringify(event.formResponse),
+    ]);
+  }
+
   event.location.forEach((loc) => {
     eventData.push(["location", loc]);
   });

@@ -30,6 +30,7 @@ import { useCalendarLists } from "../stores/calendarLists";
 import { useGetParticipant } from "../stores/participants";
 import { Header, HEADER_HEIGHT } from "./Header";
 import { CalendarListSelect } from "./CalendarListSelect";
+import { FormResponseSection } from "./FormResponseSection";
 import { ROUTES } from "../utils/routingHelper";
 import type { IBookingRequest, IOutgoingBooking } from "../utils/types";
 
@@ -327,6 +328,14 @@ function IncomingRequestCard({
             "{request.note}"
           </Typography>
         )}
+        {request.attachedForm && request.formResponse ? (
+          <Box sx={{ mt: 1.5 }}>
+            <FormResponseSection
+              attachedForm={request.attachedForm}
+              formResponse={request.formResponse}
+            />
+          </Box>
+        ) : null}
       </Box>
 
       {request.status === "pending" && (
@@ -385,6 +394,14 @@ function IncomingRequestCard({
               sidebar.
             </Typography>
           )}
+          {request.attachedForm && request.formResponse ? (
+            <Box sx={{ mt: 2 }}>
+              <FormResponseSection
+                attachedForm={request.attachedForm}
+                formResponse={request.formResponse}
+              />
+            </Box>
+          ) : null}
           {errorMsg && (
             <Typography variant="body2" color="error" sx={{ mt: 1 }}>
               {errorMsg}

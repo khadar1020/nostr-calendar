@@ -82,6 +82,7 @@ import { EventCalendarListManagement } from "./EventCalendarListManagement";
 import { signerManager } from "../common/signer";
 import { generateSecretKey } from "nostr-tools";
 import { bytesToHex } from "nostr-tools/utils";
+import { FormResponseSection } from "./FormResponseSection";
 
 interface CalendarEventCardProps {
   event: PositionedEvent;
@@ -612,6 +613,13 @@ export function CalendarEvent({ event }: CalendarEventViewProps) {
               <Divider />
             </>
           )}
+
+          {event.attachedForm && event.formResponse ? (
+            <FormResponseSection
+              attachedForm={event.attachedForm}
+              formResponse={event.formResponse}
+            />
+          ) : null}
 
           <Box display={"flex"} flexWrap={"wrap"} gap={1}>
             <Typography width={"100%"} fontWeight={600}>

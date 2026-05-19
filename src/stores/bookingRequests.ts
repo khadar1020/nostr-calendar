@@ -78,10 +78,37 @@ async function unwrapBookingRequest(giftWrap: Event): Promise<{
   title: string;
   note: string;
   dTag: string;
+  attachedForm?: IBookingRequest["attachedForm"];
+  formResponse?: IBookingRequest["formResponse"];
 }> {
   const rumor = await nip59.unwrapEvent(giftWrap);
   const getTag = (name: string) =>
     rumor.tags.find((t) => t[0] === name)?.[1] ?? "";
+  let attachedForm: IBookingRequest["attachedForm"];
+  let formResponse: IBookingRequest["formResponse"];
+
+  if (rumor.content) {
+    try {
+      const parsedContent = JSON.parse(rumor.content) as {
+        attachedForm?: IBookingRequest["attachedForm"];
+        formResponse?: IBookingRequest["formResponse"];
+      };
+      attachedForm = parsedContent.attachedForm;
+      formResponse = parsedContent.formResponse;
+    } catch {
+      // Ignore malformed content and fall back to tags-only parsing.
+    }
+  }
+
+  if (!attachedForm) {
+    const formId = getTag("form_id");
+    const formUrl = getTag("form_url");
+    const formTitle = getTag("form_title") || undefined;
+    if (formId && formUrl) {
+      attachedForm = { formId, formUrl, formTitle };
+    }
+  }
+
   return {
     schedulingPageRef: getTag("a"),
     bookerPubkey: rumor.pubkey,
@@ -90,6 +117,8 @@ async function unwrapBookingRequest(giftWrap: Event): Promise<{
     title: getTag("title"),
     note: getTag("note"),
     dTag: getTag("d"),
+    attachedForm,
+    formResponse,
   };
 }
 
@@ -257,6 +286,8 @@ export const useBookingRequests = create<BookingRequestsState>((set, get) => ({
             dTag: details.dTag,
             receivedAt: giftWrap.created_at * 1000,
             status: "pending",
+            attachedForm: details.attachedForm,
+            formResponse: details.formResponse,
           };
 
           set((state) => {
@@ -381,6 +412,8 @@ export const useBookingRequests = create<BookingRequestsState>((set, get) => ({
       repeat: { rrule: null },
       rsvpResponses: [],
       image: undefined,
+      attachedForm: request.attachedForm,
+      formResponse: request.formResponse,
     };
 
     // Pass the booker's d-tag so the published event uses it.
