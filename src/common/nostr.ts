@@ -354,6 +354,13 @@ async function preparePrivateCalendarEvent(
     }
   });
 
+  if (event.formResponse) {
+    eventData.push([
+      "booking_form_response",
+      JSON.stringify(event.formResponse),
+    ]);
+  }
+
   event.location.forEach((loc) => {
     eventData.push(["location", loc]);
   });
@@ -391,19 +398,48 @@ async function preparePrivateCalendarEvent(
   };
 }
 
-export async function publishPrivateCalendarEvent(event: ICalendarEvent) {
+export async function publishPrivateCalendarEvent(
+  event: ICalendarEvent,
+  {
+    onAcceptedRelays,
+    onRelayComplete,
+    existingDTag,
+    invitationGiftWrapTags = [],
+    waitForAll = true,
+  }: {
+    onAcceptedRelays?: (url: string) => void;
+    onRelayComplete?: (url: string, success: boolean) => void;
+    existingDTag?: string;
+    invitationGiftWrapTags?: string[][];
+    waitForAll?: boolean;
+  } = {},
+) {
   const viewSecretKey = generateSecretKey();
-  const dTagRoot = `${JSON.stringify(event)}-${Date.now()}`;
-  const dTag = bytesToHex(sha256(utf8ToBytes(dTagRoot))).substring(0, 30);
+  const dTag =
+    existingDTag ||
+    bytesToHex(
+      sha256(utf8ToBytes(`${JSON.stringify(event)}-${Date.now()}`)),
+    ).substring(0, 30);
   const { signedEvent, eventKind, userPublicKey } =
     await preparePrivateCalendarEvent(event, dTag, viewSecretKey);
 
   // Capture which relay accepts the event to use as a hint in invitations
   // and the creator's calendar list entry, so recipients can fetch from there.
   let publishedRelayHint = "";
-  await publishToRelays(signedEvent, (url) => {
-    if (!publishedRelayHint) publishedRelayHint = url;
-  });
+  const publishResult = publishToRelays(
+    signedEvent,
+    (url) => {
+      if (!publishedRelayHint) publishedRelayHint = url;
+      onAcceptedRelays?.(url);
+    },
+    undefined,
+    onRelayComplete,
+  );
+  if (waitForAll) {
+    await publishResult;
+  } else {
+    void publishResult;
+  }
 
   // Gift-wrap the event keys to each participant (including the creator).
   // These serve as invitations — recipients will see them as notifications
@@ -427,6 +463,7 @@ export async function publishPrivateCalendarEvent(event: ICalendarEvent) {
               publishedRelayHint,
             ],
             ["viewKey", nip19.nsecEncode(viewSecretKey)],
+            ...invitationGiftWrapTags,
           ],
         },
         participant,
@@ -458,6 +495,7 @@ export async function publishPrivateCalendarEvent(event: ICalendarEvent) {
     authorPubkey: userPublicKey,
     calendarEvent: signedEvent,
     giftWraps: giftWraps.map(({ giftWrap }) => giftWrap),
+    viewKey: nip19.nsecEncode(viewSecretKey),
   };
 }
 

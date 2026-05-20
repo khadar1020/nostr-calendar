@@ -50,6 +50,7 @@ import {
 import { EventCalendarListManagement } from "./EventCalendarListManagement";
 import { FormFillerDialog } from "./FormFillerDialog";
 import { FormAttachmentRow } from "./FormAttachmentRow";
+import { FormResponseSection } from "./FormResponseSection";
 import type { IFormAttachment } from "../utils/types";
 import { useEventRsvps } from "../hooks/useEventRsvps";
 import { RSVPBar } from "./RSVPBar";
@@ -538,6 +539,13 @@ export function CalendarEvent({ event }: CalendarEventViewProps) {
               <Divider />
             </>
           )}
+
+          {event.formResponse ? (
+            <FormResponseSection
+              attachedForm={standaloneForms[0]}
+              formResponse={event.formResponse}
+            />
+          ) : null}
 
           <Box display={"flex"} flexWrap={"wrap"} gap={1}>
             <Typography width={"100%"} fontWeight={600}>

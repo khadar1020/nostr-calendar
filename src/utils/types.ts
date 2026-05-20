@@ -5,6 +5,13 @@ export enum RSVPStatus {
   pending = "pending",
 }
 
+export enum RSVPResponse {
+  accepted = "accepted",
+  declined = "declined",
+  tentative = "tentative",
+  pending = "pending",
+}
+
 export enum RepeatingFrequency {
   None = "none",
   Daily = "daily",
@@ -48,6 +55,17 @@ export interface IFormAttachment {
   viewKey?: string;
 }
 
+export interface IFormResponseAnswer {
+  fieldId: string;
+  label: string;
+  value: string | string[] | number | boolean | null;
+}
+
+export interface IFormResponseSnapshot {
+  submittedAt: number;
+  answers: IFormResponseAnswer[];
+}
+
 export interface ICalendarEvent {
   begin: number;
   description: string;
@@ -85,4 +103,93 @@ export interface ICalendarEvent {
    * Currently only persisted for private events.
    */
   forms?: IFormAttachment[];
+  /** Optional snapshot copied from a booking-time form submission. */
+  formResponse?: IFormResponseSnapshot;
+}
+
+// --- Appointment Scheduling Types ---
+
+export type DurationMode = "fixed" | "free";
+
+export interface IAvailabilityWindow {
+  type: "recurring" | "date";
+  dayOfWeek?: number;
+  date?: string;
+  startTime: string;
+  endTime: string;
+}
+
+export interface ISchedulingPage {
+  id: string;
+  eventId: string;
+  user: string;
+  title: string;
+  description: string;
+  slotDurations: number[];
+  durationMode: DurationMode;
+  availabilityWindows: IAvailabilityWindow[];
+  blockedDates: string[];
+  timezone: string;
+  minNotice: number;
+  maxAdvance: number;
+  buffer: number;
+  expiry: number;
+  location: string;
+  image?: string;
+  eventTitle?: string;
+  relayHints?: string[];
+  isPrivate?: boolean;
+  viewKey?: string;
+  createdAt: number;
+  attachedForm?: IFormAttachment;
+}
+
+export type BookingRequestStatus =
+  | "pending"
+  | "approved"
+  | "declined"
+  | "expired"
+  | "cancelled";
+
+export interface IBookingRequest {
+  id: string;
+  giftWrapId: string;
+  schedulingPageRef: string;
+  bookerPubkey: string;
+  start: number;
+  end: number;
+  title: string;
+  note: string;
+  dTag: string;
+  receivedAt: number;
+  status: BookingRequestStatus;
+  respondedAt?: number;
+  declineReason?: string;
+  attachedForm?: IFormAttachment;
+  formResponse?: IFormResponseSnapshot;
+}
+
+export interface IOutgoingBooking {
+  id: string;
+  giftWrapId: string;
+  schedulingPageRef: string;
+  creatorPubkey: string;
+  start: number;
+  end: number;
+  title: string;
+  note: string;
+  sentAt: number;
+  status: BookingRequestStatus;
+  respondedAt?: number;
+  declineReason?: string;
+  eventRef?: string;
+  dTag?: string;
+  viewKey?: string;
+  attachedForm?: IFormAttachment;
+  formResponse?: IFormResponseSnapshot;
+}
+
+export interface ITimeSlot {
+  start: Date;
+  end: Date;
 }

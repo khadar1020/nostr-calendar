@@ -3,6 +3,8 @@ export enum EventKinds {
   CalendarEventGiftWrap = 1052,
   CalendarEventRumor = 52,
   PrivateRSVPEvent = 32069,
+  RSVPGiftWrap = 1055,
+  RSVPRumor = 55,
   // Public Events
   PublicCalendarEvent = 31923,
   PublicRSVPEvent = 31925,
@@ -22,7 +24,21 @@ export enum EventKinds {
   // Relay List (NIP-65)
   RelayList = 10002,
 
-  // Formstr / NIP-101
-  FormTemplate = 30168,
+  // Appointment Scheduling
+  SchedulingPage = 31927,
+  BookingRequestGiftWrap = 1057,
+  BookingRequestRumor = 57,
+  BookingResponseGiftWrap = 1058,
+  BookingResponseRumor = 58,
   FormResponse = 1069,
+  FormTemplate = 30168,
+
+  // Public Busy List (free/busy "I'm unavailable here" entries; one event per
+  // user per calendar month, replacement key = ["d", "YYYY-MM"]).
+  PublicBusyList = 31926,
+
+  // Scheduling Pages List (per-page self-encrypted record holding the
+  // viewKey for one scheduling page authored by the user). Parameterized-
+  // replaceable per (pubkey, page d-tag); empty content = tombstone.
+  SchedulingPagesList = 32680,
 }
