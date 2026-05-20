@@ -49,6 +49,7 @@ import { signerManager } from "../common/signer";
 import { useFormSubmissionStatus } from "../hooks/useFormSubmissionStatus";
 import { useUser } from "../stores/user";
 import { fetchAttachedFormCached } from "../utils/formAttachment";
+import { extractFormResponseTags } from "../utils/formResponse";
 import { buildFormstrUrl } from "../utils/formLink";
 
 type SdkOption = {
@@ -66,6 +67,7 @@ type SdkField = {
 };
 type SdkForm = {
   id: string;
+  pubkey: string;
   name?: string;
   html?: { form: string };
   fields?: Record<string, SdkField>;
@@ -76,6 +78,13 @@ type ResponseRow = {
   fieldId: string;
   question: string;
   answer: string;
+};
+
+type FormSubmitSigner = {
+  getPublicKey: () => Promise<string>;
+  signEvent: (event: EventTemplate) => Promise<NostrEvent>;
+  nip44Encrypt: (pubkey: string, plaintext: string) => Promise<string>;
+  nip44Decrypt: (pubkey: string, ciphertext: string) => Promise<string>;
 };
 
 function plainText(html: string | undefined): string {
@@ -154,15 +163,16 @@ function formatAnswer(
   return rawValue;
 }
 
-function responseRowsFromEvent(
+async function responseRowsFromEvent(
   response: NostrEvent,
   form: SdkForm | null,
   noAnswerLabel: string,
   unknownQuestionLabel: string,
-): ResponseRow[] {
-  const responseTags = response.tags.filter(
-    (tag) => tag[0] === "response" && tag[1],
-  );
+): Promise<ResponseRow[]> {
+  const responseTags =
+    form == null
+      ? []
+      : await extractFormResponseTags(response, form.pubkey);
   const tagsByField = new Map<string, string[]>();
   for (const tag of responseTags) {
     tagsByField.set(tag[1], tag);
@@ -239,15 +249,7 @@ export function FormFillerDialog({
   const [submitting, setSubmitting] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const responseRows = useMemo(() => {
-    if (status.state !== "submitted" || !status.event) return [];
-    return responseRowsFromEvent(
-      status.event,
-      form,
-      intl.formatMessage({ id: "form.noAnswer" }),
-      intl.formatMessage({ id: "form.unknownQuestion" }),
-    );
-  }, [status, form, intl]);
+  const [responseRows, setResponseRows] = useState<ResponseRow[]>([]);
 
   const fetchForm = useCallback(async () => {
     if (!attachment) return;
@@ -297,15 +299,61 @@ export function FormFillerDialog({
   }, [open, attachment, fetchForm, status.state, resubmitting]);
 
   useEffect(() => {
+    let cancelled = false;
+
+    if (status.state !== "submitted" || !status.event || !form) {
+      setResponseRows([]);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void responseRowsFromEvent(
+      status.event,
+      form,
+      intl.formatMessage({ id: "form.noAnswer" }),
+      intl.formatMessage({ id: "form.unknownQuestion" }),
+    ).then((rows) => {
+      if (!cancelled) {
+        setResponseRows(rows);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [status, form, intl]);
+
+  useEffect(() => {
     if (!form || !sdkRef.current || !containerRef.current) return;
     const sdk = sdkRef.current;
 
-    const signer = async (event: EventTemplate): Promise<NostrEvent> => {
-      const active = await signerManager.getSigner();
-      return active.signEvent(event);
+    const signer: FormSubmitSigner = {
+      getPublicKey: async () => {
+        const active = await signerManager.getSigner();
+        return active.getPublicKey();
+      },
+      signEvent: async (event: EventTemplate): Promise<NostrEvent> => {
+        const active = await signerManager.getSigner();
+        return active.signEvent(event);
+      },
+      nip44Encrypt: async (pubkey: string, plaintext: string) => {
+        const active = await signerManager.getSigner();
+        if (!active.nip44Encrypt) {
+          throw new Error("Current signer does not support NIP-44 encryption");
+        }
+        return active.nip44Encrypt(pubkey, plaintext);
+      },
+      nip44Decrypt: async (pubkey: string, ciphertext: string) => {
+        const active = await signerManager.getSigner();
+        if (!active.nip44Decrypt) {
+          throw new Error("Current signer does not support NIP-44 decryption");
+        }
+        return active.nip44Decrypt(pubkey, ciphertext);
+      },
     };
 
-    sdk.attachSubmitListener(form as never, signer, {
+    sdk.attachSubmitListener(form as never, signer as never, {
       onSuccess: ({ event }) => {
         setSubmitting(false);
         markSubmitted(event);

@@ -6,6 +6,7 @@ import { fetchUserFormResponse } from "../common/nostr";
 import { useFormSubmissionStatus } from "../hooks/useFormSubmissionStatus";
 import { useUser } from "../stores/user";
 import { fetchAttachedFormCached } from "../utils/formAttachment";
+import { extractFormResponseTags } from "../utils/formResponse";
 import { getFormAddress } from "../utils/formLink";
 import type {
   IFormAttachment,
@@ -31,6 +32,7 @@ type SdkField = {
 
 type SdkForm = {
   id: string;
+  pubkey: string;
   fields?: Record<string, SdkField>;
   fieldOrder?: string[];
 };
@@ -130,13 +132,11 @@ function normalizeAnswerValue(
   return rawValue;
 }
 
-function buildSnapshotFromResponse(
+async function buildSnapshotFromResponse(
   response: NostrEvent,
   form: SdkForm,
-): IFormResponseSnapshot {
-  const responseTags = response.tags.filter(
-    (tag) => tag[0] === "response" && tag[1],
-  );
+) : Promise<IFormResponseSnapshot> {
+  const responseTags = await extractFormResponseTags(response, form.pubkey);
   const tagsByField = new Map<string, string[]>();
   for (const tag of responseTags) {
     tagsByField.set(tag[1], tag);
@@ -226,7 +226,7 @@ export function BookingFormRenderer({
           );
         }
 
-        setSnapshot(buildSnapshotFromResponse(event, form));
+        setSnapshot(await buildSnapshotFromResponse(event, form));
       } catch (error) {
         console.error("[BookingFormRenderer] resolve snapshot failed", error);
         setSnapshot(undefined);
