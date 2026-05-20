@@ -1,13 +1,13 @@
 import { Event } from "nostr-tools";
+import { getRelays } from "../common/nostr";
 import type {
-  ICalendarEvent,
-  ISchedulingPage,
-  IAvailabilityWindow,
   DurationMode,
+  IAvailabilityWindow,
   IBusyList,
   IBusyRange,
+  ICalendarEvent,
+  ISchedulingPage,
 } from "./types";
-import { getRelays } from "../common/nostr";
 
 export const nostrEventToCalendar = (
   event: Event,
@@ -82,32 +82,15 @@ export const nostrEventToCalendar = (
           parsedEvent.notificationPreference = value;
         }
         break;
-      case "booking_form_id":
-        parsedEvent.attachedForm = {
-          ...(parsedEvent.attachedForm || {
-            formId: "",
-            formUrl: "",
-          }),
-          formId: value,
-        };
-        break;
-      case "booking_form_title":
-        parsedEvent.attachedForm = {
-          ...(parsedEvent.attachedForm || {
-            formId: "",
-            formUrl: "",
-          }),
-          formTitle: value,
-        };
-        break;
-      case "booking_form_url":
-        parsedEvent.attachedForm = {
-          ...(parsedEvent.attachedForm || {
-            formId: "",
-            formUrl: "",
-          }),
-          formUrl: value,
-        };
+      case "form":
+        if (value) {
+          const viewKey = event.tags[index]?.[2];
+          if (!parsedEvent.forms) parsedEvent.forms = [];
+          parsedEvent.forms.push({
+            naddr: value,
+            ...(viewKey ? { viewKey } : {}),
+          });
+        }
         break;
       case "booking_form_response":
         try {
@@ -130,9 +113,6 @@ export const nostrEventToCalendar = (
   return parsedEvent;
 };
 
-/**
- * Parse a Nostr event (kind 31927) into an ISchedulingPage.
- */
 export const nostrEventToSchedulingPage = (event: Event): ISchedulingPage => {
   const page: ISchedulingPage = {
     id: "",
@@ -217,23 +197,13 @@ export const nostrEventToSchedulingPage = (event: Event): ISchedulingPage => {
       case "event_title":
         page.eventTitle = values[0];
         break;
-      case "form_id":
-        page.attachedForm = {
-          ...(page.attachedForm || { formId: "", formUrl: "" }),
-          formId: values[0],
-        };
-        break;
-      case "form_title":
-        page.attachedForm = {
-          ...(page.attachedForm || { formId: "", formUrl: "" }),
-          formTitle: values[0],
-        };
-        break;
-      case "form_url":
-        page.attachedForm = {
-          ...(page.attachedForm || { formId: "", formUrl: "" }),
-          formUrl: values[0],
-        };
+      case "form":
+        if (values[0]) {
+          page.attachedForm = {
+            naddr: values[0],
+            ...(values[1] ? { viewKey: values[1] } : {}),
+          };
+        }
         break;
       case "relay":
         page.relayHints!.push(values[0]);
@@ -244,9 +214,6 @@ export const nostrEventToSchedulingPage = (event: Event): ISchedulingPage => {
   return page;
 };
 
-/**
- * Serialize an ISchedulingPage into Nostr tags for publishing.
- */
 export const schedulingPageToTags = (page: ISchedulingPage): string[][] => {
   const tags: string[][] = [
     ["d", page.id],
@@ -303,20 +270,14 @@ export const schedulingPageToTags = (page: ISchedulingPage): string[][] => {
     tags.push(["event_title", page.eventTitle]);
   }
 
-  if (page.attachedForm?.formId) {
-    tags.push(["form_id", page.attachedForm.formId]);
+  if (page.attachedForm?.naddr) {
+    tags.push([
+      "form",
+      page.attachedForm.naddr,
+      ...(page.attachedForm.viewKey ? [page.attachedForm.viewKey] : []),
+    ]);
   }
 
-  if (page.attachedForm?.formTitle) {
-    tags.push(["form_title", page.attachedForm.formTitle]);
-  }
-
-  if (page.attachedForm?.formUrl) {
-    tags.push(["form_url", page.attachedForm.formUrl]);
-  }
-
-  // Add relay hints so consumers know where to find this event
-  // and where to publish booking requests
   for (const relay of getRelays()) {
     tags.push(["relay", relay]);
   }
@@ -343,13 +304,12 @@ export function busyListMonthKeyFromDTag(dTag: string): string | null {
  *
  * Wire format:
  *   tags: [
- *     ["d", "YYYY-MM"],         // replacement key (NIP-01 §16)
- *     ["t", "YYYY-MM"],         // queryable hashtag (NIP-12)
- *     ["t", "busy"],            // secondary hashtag
- *     ["block", "<startSec>", "<endSec>"], // repeatable
- *     ...
+ *     ["d", "YYYY-MM"],
+ *     ["t", "YYYY-MM"],
+ *     ["t", "busy"],
+ *     ["block", "<startSec>", "<endSec>"],
  *   ]
- *   content: ""  (intentionally empty — no titles/descs leaked)
+ *   content: ""
  */
 export function nostrEventToBusyList(event: Event): IBusyList | null {
   const dTag = event.tags.find((t) => t[0] === "d")?.[1] ?? "";
@@ -365,13 +325,13 @@ export function nostrEventToBusyList(event: Event): IBusyList | null {
     if (end <= start) continue;
     ranges.push({ start, end });
   }
-  // Sort + dedupe by exact start/end.
+
   ranges.sort((a, b) => a.start - b.start || a.end - b.end);
   const deduped: IBusyRange[] = [];
-  for (const r of ranges) {
+  for (const range of ranges) {
     const last = deduped[deduped.length - 1];
-    if (last && last.start === r.start && last.end === r.end) continue;
-    deduped.push(r);
+    if (last && last.start === range.start && last.end === range.end) continue;
+    deduped.push(range);
   }
 
   return {
@@ -383,22 +343,21 @@ export function nostrEventToBusyList(event: Event): IBusyList | null {
   };
 }
 
-/**
- * Serialize an IBusyList into Nostr tags. Caller is responsible for setting
- * `kind`, `pubkey`, `created_at`, `content: ""`.
- */
+/** Serialize an IBusyList into Nostr tags. */
 export function busyListToTags(list: IBusyList): string[][] {
   const tags: string[][] = [
     ["d", busyListDTag(list.monthKey)],
     ["t", list.monthKey],
     ["t", "busy"],
   ];
-  for (const r of list.ranges) {
+
+  for (const range of list.ranges) {
     tags.push([
       "block",
-      String(Math.floor(r.start / 1000)),
-      String(Math.floor(r.end / 1000)),
+      String(Math.floor(range.start / 1000)),
+      String(Math.floor(range.end / 1000)),
     ]);
   }
+
   return tags;
 }

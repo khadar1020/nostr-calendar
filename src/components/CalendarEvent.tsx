@@ -79,10 +79,10 @@ import {
 } from "../utils/eventOccurrence";
 import { isBusyListRangeSupportedForEvent } from "../utils/busyList";
 import { EventCalendarListManagement } from "./EventCalendarListManagement";
-import { signerManager } from "../common/signer";
-import { generateSecretKey } from "nostr-tools";
-import { bytesToHex } from "nostr-tools/utils";
 import { FormResponseSection } from "./FormResponseSection";
+import { FormAttachmentRow } from "./FormAttachmentRow";
+import { FormFillerDialog } from "./FormFillerDialog";
+import type { IFormAttachment } from "../utils/types";
 
 interface CalendarEventCardProps {
   event: PositionedEvent;
@@ -505,6 +505,7 @@ export function CalendarEvent({ event }: CalendarEventViewProps) {
   const intl = useIntl();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
+  const [activeForm, setActiveForm] = useState<IFormAttachment | null>(null);
   const eventDisplayRange = getEventDisplayRange(event);
   const locations = event.location.filter((location) => !!location?.trim?.());
   const { calendars, moveEventToCalendar } = useCalendarLists();
@@ -517,6 +518,7 @@ export function CalendarEvent({ event }: CalendarEventViewProps) {
   const calendar = event.calendarId
     ? calendars.find((c) => c.id === event.calendarId)
     : undefined;
+  const standaloneForms = event.forms ?? [];
 
   const handleCalendarUpdate = async (nextCalendarId: string) => {
     const sourceCalendarId = event.calendarId;
@@ -614,9 +616,28 @@ export function CalendarEvent({ event }: CalendarEventViewProps) {
             </>
           )}
 
-          {event.attachedForm && event.formResponse ? (
+          {standaloneForms.length > 0 && (
+            <>
+              <Typography variant="subtitle1">
+                {intl.formatMessage({ id: "form.attachments" })}
+              </Typography>
+              <Stack spacing={1}>
+                {standaloneForms.map((attachment) => (
+                  <FormAttachmentRow
+                    key={`${attachment.naddr}:${attachment.viewKey ?? ""}`}
+                    attachment={attachment}
+                    eventAuthor={event.user}
+                    onFill={setActiveForm}
+                  />
+                ))}
+              </Stack>
+              <Divider />
+            </>
+          )}
+
+          {event.formResponse ? (
             <FormResponseSection
-              attachedForm={event.attachedForm}
+              attachedForm={standaloneForms[0]}
               formResponse={event.formResponse}
             />
           ) : null}
@@ -661,6 +682,12 @@ export function CalendarEvent({ event }: CalendarEventViewProps) {
           )}
         </Stack>
       </Box>
+      <FormFillerDialog
+        open={!!activeForm}
+        attachment={activeForm}
+        onClose={() => setActiveForm(null)}
+        onSubmitted={() => setActiveForm(null)}
+      />
     </Box>
   );
 }

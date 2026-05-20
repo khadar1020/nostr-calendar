@@ -30,6 +30,8 @@ export enum EventKinds {
   BookingRequestRumor = 57,
   BookingResponseGiftWrap = 1058,
   BookingResponseRumor = 58,
+  FormResponse = 1069,
+  FormTemplate = 30168,
 
   // Public Busy List (free/busy "I'm unavailable here" entries; one event per
   // user per calendar month, replacement key = ["d", "YYYY-MM"]).

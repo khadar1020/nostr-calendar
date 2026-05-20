@@ -1,7 +1,7 @@
 import { Box, Button, Divider, Link, Stack, Typography } from "@mui/material";
 import dayjs from "dayjs";
-import type { IAttachedFormRef, IFormResponseSnapshot } from "../utils/types";
-import { getAttachedFormDisplayTitle } from "../utils/bookingForms";
+import type { IFormAttachment, IFormResponseSnapshot } from "../utils/types";
+import { buildFormstrUrl } from "../utils/formLink";
 
 function formatAnswerValue(
   value: string | string[] | number | boolean | null,
@@ -17,7 +17,7 @@ function formatAnswerValue(
 }
 
 interface FormResponseSectionProps {
-  attachedForm?: IAttachedFormRef;
+  attachedForm?: IFormAttachment;
   formResponse?: IFormResponseSnapshot;
   compact?: boolean;
 }
@@ -30,6 +30,12 @@ export function FormResponseSection({
   if (!attachedForm && !formResponse) {
     return null;
   }
+
+  const formLabel = attachedForm
+    ? attachedForm.naddr.length > 24
+      ? `${attachedForm.naddr.slice(0, 12)}…${attachedForm.naddr.slice(-8)}`
+      : attachedForm.naddr
+    : null;
 
   return (
     <>
@@ -46,14 +52,14 @@ export function FormResponseSection({
             <Typography variant="subtitle1">Form response</Typography>
             {attachedForm ? (
               <Typography variant="body2" color="text.secondary">
-                {getAttachedFormDisplayTitle(attachedForm)}
+                {formLabel}
               </Typography>
             ) : null}
           </Box>
-          {attachedForm?.formUrl ? (
+          {attachedForm ? (
             <Button
               component={Link}
-              href={attachedForm.formUrl}
+              href={buildFormstrUrl(attachedForm)}
               target="_blank"
               rel="noreferrer"
               size="small"

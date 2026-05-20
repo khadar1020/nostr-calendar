@@ -90,10 +90,8 @@ async function unwrapBookingRequest(giftWrap: Event): Promise<{
   if (rumor.content) {
     try {
       const parsedContent = JSON.parse(rumor.content) as {
-        attachedForm?: IBookingRequest["attachedForm"];
         formResponse?: IBookingRequest["formResponse"];
       };
-      attachedForm = parsedContent.attachedForm;
       formResponse = parsedContent.formResponse;
     } catch {
       // Ignore malformed content and fall back to tags-only parsing.
@@ -101,11 +99,12 @@ async function unwrapBookingRequest(giftWrap: Event): Promise<{
   }
 
   if (!attachedForm) {
-    const formId = getTag("form_id");
-    const formUrl = getTag("form_url");
-    const formTitle = getTag("form_title") || undefined;
-    if (formId && formUrl) {
-      attachedForm = { formId, formUrl, formTitle };
+    const formTag = rumor.tags.find((t) => t[0] === "form" && t[1]);
+    if (formTag) {
+      attachedForm = {
+        naddr: formTag[1],
+        ...(formTag[2] ? { viewKey: formTag[2] } : {}),
+      };
     }
   }
 
@@ -412,7 +411,7 @@ export const useBookingRequests = create<BookingRequestsState>((set, get) => ({
       repeat: { rrule: null },
       rsvpResponses: [],
       image: undefined,
-      attachedForm: request.attachedForm,
+      forms: request.attachedForm ? [request.attachedForm] : undefined,
       formResponse: request.formResponse,
     };
 

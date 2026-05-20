@@ -1,40 +1,39 @@
-import { useEffect, useMemo, useState } from "react";
-import {
-  Alert,
-  Box,
-  Checkbox,
-  CircularProgress,
-  FormControl,
-  FormControlLabel,
-  FormGroup,
-  FormLabel,
-  MenuItem,
-  Paper,
-  Radio,
-  RadioGroup,
-  Select,
-  Stack,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableRow,
-  TextField,
-  Typography,
-} from "@mui/material";
-import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import type { IAttachedFormRef, IFormResponseSnapshot } from "../utils/types";
-import {
-  BookingFormValue,
-  buildFormResponseSnapshot,
-  FormstrNormalizedField,
-  FormstrNormalizedForm,
-  getAttachedFormDisplayTitle,
-  getUnsupportedFormFields,
-  loadAttachedFormDefinition,
-  validateBookingFormValues,
-} from "../utils/bookingForms";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Alert, Box, Paper, Stack, Typography } from "@mui/material";
+import type { Event as NostrEvent } from "nostr-tools";
+import { useIntl } from "react-intl";
+import { fetchUserFormResponse } from "../common/nostr";
+import { useFormSubmissionStatus } from "../hooks/useFormSubmissionStatus";
+import { useUser } from "../stores/user";
+import { fetchAttachedFormCached } from "../utils/formAttachment";
+import { getFormAddress } from "../utils/formLink";
+import type {
+  IFormAttachment,
+  IFormResponseAnswer,
+  IFormResponseSnapshot,
+} from "../utils/types";
+import { FormAttachmentRow } from "./FormAttachmentRow";
+import { FormFillerDialog } from "./FormFillerDialog";
+
+type SdkOption = {
+  id: string;
+  labelHtml: string;
+  config?: { isOther?: boolean };
+};
+
+type SdkField = {
+  id: string;
+  type: string;
+  labelHtml: string;
+  options?: SdkOption[] | unknown;
+  config?: { renderElement?: string };
+};
+
+type SdkForm = {
+  id: string;
+  fields?: Record<string, SdkField>;
+  fieldOrder?: string[];
+};
 
 export interface BookingFormRenderState {
   loading: boolean;
@@ -44,497 +43,308 @@ export interface BookingFormRenderState {
 }
 
 interface BookingFormRendererProps {
-  attachedForm: IAttachedFormRef;
+  attachedForm: IFormAttachment;
   onStateChange: (state: BookingFormRenderState) => void;
 }
 
-function getRenderElement(field: FormstrNormalizedField) {
-  return field.config.renderElement || field.type;
+function plainText(html: string | undefined): string {
+  if (!html) return "";
+  if (typeof document === "undefined") {
+    return html.replace(/<[^>]*>/g, "").trim();
+  }
+  const div = document.createElement("div");
+  div.innerHTML = html;
+  return (div.textContent || div.innerText || "").trim();
 }
 
-function GridField({
-  field,
-  value,
-  onChange,
-}: {
-  field: FormstrNormalizedField;
-  value: Record<string, string>;
-  onChange: (nextValue: Record<string, string>) => void;
-}) {
-  const options = field.options as unknown as
-    | {
-        columns: Array<[string, string]>;
-        rows: Array<[string, string]>;
+function parseMetadata(raw: string | undefined): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function normalizeAnswerValue(
+  field: SdkField | undefined,
+  rawValue: string | undefined,
+  metadataRaw: string | undefined,
+): IFormResponseAnswer["value"] {
+  if (!rawValue) return null;
+  if (!field) return rawValue;
+
+  if (field.type === "option" && Array.isArray(field.options)) {
+    const metadata = parseMetadata(metadataRaw);
+    const labels = rawValue
+      .split(";")
+      .filter(Boolean)
+      .map((id) => {
+        const options = Array.isArray(field.options) ? field.options : [];
+        const option = options.find((entry) => entry.id === id);
+        const label = option ? plainText(option.labelHtml) || id : id;
+        if (option?.config?.isOther && typeof metadata.message === "string") {
+          return `${label} (${metadata.message})`;
+        }
+        return label;
+      });
+    if (labels.length === 0) return null;
+    return labels.length === 1 ? labels[0] : labels;
+  }
+
+  if (field.config?.renderElement === "number") {
+    const numeric = Number(rawValue);
+    return Number.isFinite(numeric) ? numeric : rawValue;
+  }
+
+  if (field.config?.renderElement === "datetime") {
+    const timestamp = Number(rawValue);
+    if (Number.isFinite(timestamp)) {
+      return new Date(timestamp * 1000).toLocaleString();
+    }
+  }
+
+  if (field.config?.renderElement === "fileUpload") {
+    try {
+      const metadata = JSON.parse(rawValue) as { filename?: string };
+      if (metadata.filename) return metadata.filename;
+    } catch {
+      return rawValue;
+    }
+  }
+
+  if (field.type === "grid") {
+    try {
+      const parsed = JSON.parse(rawValue) as Record<string, string>;
+      if (parsed && typeof parsed === "object") {
+        return Object.entries(parsed)
+          .map(([rowId, selected]) => `${rowId}: ${selected}`)
+          .join(" | ");
       }
-    | undefined;
-  const rows = options?.rows ?? [];
-  const columns = options?.columns ?? [];
-  const isCheckboxGrid = getRenderElement(field) === "checkboxGrid";
+    } catch {
+      return rawValue;
+    }
+  }
 
-  return (
-    <Table size="small">
-      <TableHead>
-        <TableRow>
-          <TableCell />
-          {columns.map(([columnId, columnLabel]) => (
-            <TableCell key={columnId} align="center">
-              <Markdown remarkPlugins={[remarkGfm]}>{columnLabel}</Markdown>
-            </TableCell>
-          ))}
-        </TableRow>
-      </TableHead>
-      <TableBody>
-        {rows.map(([rowId, rowLabel]) => (
-          <TableRow key={rowId}>
-            <TableCell sx={{ minWidth: 160 }}>
-              <Markdown remarkPlugins={[remarkGfm]}>{rowLabel}</Markdown>
-            </TableCell>
-            {columns.map(([columnId]) => {
-              const currentRowValue = value[rowId] || "";
-              const isChecked = isCheckboxGrid
-                ? currentRowValue.split(";").includes(columnId)
-                : currentRowValue === columnId;
-
-              return (
-                <TableCell key={columnId} align="center">
-                  {isCheckboxGrid ? (
-                    <Checkbox
-                      checked={isChecked}
-                      onChange={(event) => {
-                        const selections = currentRowValue
-                          .split(";")
-                          .filter(Boolean);
-                        const nextSelections = event.target.checked
-                          ? Array.from(new Set([...selections, columnId])).sort()
-                          : selections.filter((item) => item !== columnId);
-                        const nextValue = { ...value };
-                        if (nextSelections.length > 0) {
-                          nextValue[rowId] = nextSelections.join(";");
-                        } else {
-                          delete nextValue[rowId];
-                        }
-                        onChange(nextValue);
-                      }}
-                    />
-                  ) : (
-                    <Radio
-                      checked={isChecked}
-                      onChange={() => onChange({ ...value, [rowId]: columnId })}
-                    />
-                  )}
-                </TableCell>
-              );
-            })}
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
-  );
+  return rawValue;
 }
 
-function FormField({
-  field,
-  value,
-  onChange,
-}: {
-  field: FormstrNormalizedField;
-  value: BookingFormValue;
-  onChange: (nextValue: BookingFormValue) => void;
-}) {
-  const renderElement = getRenderElement(field);
-  const label = field.labelHtml;
-
-  if (renderElement === "label") {
-    return <Markdown remarkPlugins={[remarkGfm]}>{label}</Markdown>;
-  }
-
-  if (renderElement === "paragraph") {
-    return (
-      <TextField
-        fullWidth
-        multiline
-        minRows={4}
-        label={label}
-        value={typeof value === "string" ? value : ""}
-        onChange={(event) => onChange(event.target.value)}
-        required={Boolean(field.config.required)}
-      />
-    );
-  }
-
-  if (renderElement === "number") {
-    return (
-      <TextField
-        fullWidth
-        type="number"
-        label={label}
-        value={value == null ? "" : String(value)}
-        onChange={(event) => onChange(event.target.value)}
-        required={Boolean(field.config.required)}
-      />
-    );
-  }
-
-  if (renderElement === "radioButton") {
-    return (
-      <FormControl required={Boolean(field.config.required)}>
-        <FormLabel>{label}</FormLabel>
-        <RadioGroup
-          value={typeof value === "string" ? value : ""}
-          onChange={(event) => onChange(event.target.value)}
-        >
-          {field.options?.map((option) => (
-            <FormControlLabel
-              key={option.id}
-              value={option.id}
-              control={<Radio />}
-              label={
-                <Markdown remarkPlugins={[remarkGfm]}>
-                  {option.labelHtml}
-                </Markdown>
-              }
-            />
-          ))}
-        </RadioGroup>
-      </FormControl>
-    );
-  }
-
-  if (renderElement === "checkboxes") {
-    const values = Array.isArray(value) ? value : [];
-    return (
-      <FormControl required={Boolean(field.config.required)}>
-        <FormLabel>{label}</FormLabel>
-        <FormGroup>
-          {field.options?.map((option) => (
-            <FormControlLabel
-              key={option.id}
-              control={
-                <Checkbox
-                  checked={values.includes(option.id)}
-                  onChange={(event) => {
-                    const nextValues = event.target.checked
-                      ? Array.from(new Set([...values, option.id]))
-                      : values.filter((item) => item !== option.id);
-                    onChange(nextValues);
-                  }}
-                />
-              }
-              label={
-                <Markdown remarkPlugins={[remarkGfm]}>
-                  {option.labelHtml}
-                </Markdown>
-              }
-            />
-          ))}
-        </FormGroup>
-      </FormControl>
-    );
-  }
-
-  if (renderElement === "dropdown") {
-    return (
-      <FormControl fullWidth required={Boolean(field.config.required)}>
-        <FormLabel sx={{ mb: 1 }}>{label}</FormLabel>
-        <Select
-          value={typeof value === "string" ? value : ""}
-          onChange={(event) => onChange(String(event.target.value))}
-          displayEmpty
-        >
-          <MenuItem value="">
-            <em>Select an option</em>
-          </MenuItem>
-          {field.options?.map((option) => (
-            <MenuItem key={option.id} value={option.id}>
-              {option.labelHtml}
-            </MenuItem>
-          ))}
-        </Select>
-      </FormControl>
-    );
-  }
-
-  if (renderElement === "date") {
-    return (
-      <TextField
-        fullWidth
-        type="date"
-        label={label}
-        InputLabelProps={{ shrink: true }}
-        value={typeof value === "string" ? value : ""}
-        onChange={(event) => onChange(event.target.value)}
-        required={Boolean(field.config.required)}
-      />
-    );
-  }
-
-  if (renderElement === "time") {
-    return (
-      <TextField
-        fullWidth
-        type="time"
-        label={label}
-        InputLabelProps={{ shrink: true }}
-        value={typeof value === "string" ? value : ""}
-        onChange={(event) => onChange(event.target.value)}
-        required={Boolean(field.config.required)}
-      />
-    );
-  }
-
-  if (renderElement === "datetime") {
-    return (
-      <TextField
-        fullWidth
-        type="datetime-local"
-        label={label}
-        InputLabelProps={{ shrink: true }}
-        value={typeof value === "string" ? value : ""}
-        onChange={(event) => onChange(event.target.value)}
-        required={Boolean(field.config.required)}
-      />
-    );
-  }
-
-  if (
-    renderElement === "multipleChoiceGrid" ||
-    renderElement === "checkboxGrid"
-  ) {
-    return (
-      <FormControl fullWidth required={Boolean(field.config.required)}>
-        <FormLabel sx={{ mb: 1 }}>{label}</FormLabel>
-        <GridField
-          field={field}
-          value={
-            typeof value === "object" && value && !Array.isArray(value)
-              ? (value as Record<string, string>)
-              : {}
-          }
-          onChange={onChange as (nextValue: Record<string, string>) => void}
-        />
-      </FormControl>
-    );
-  }
-
-  return (
-    <TextField
-      fullWidth
-      label={label}
-      value={typeof value === "string" ? value : ""}
-      onChange={(event) => onChange(event.target.value)}
-      required={Boolean(field.config.required)}
-    />
+function buildSnapshotFromResponse(
+  response: NostrEvent,
+  form: SdkForm,
+): IFormResponseSnapshot {
+  const responseTags = response.tags.filter(
+    (tag) => tag[0] === "response" && tag[1],
   );
+  const tagsByField = new Map<string, string[]>();
+  for (const tag of responseTags) {
+    tagsByField.set(tag[1], tag);
+  }
+
+  const fields = form.fields ?? {};
+  const fieldOrder = form.fieldOrder ?? [];
+  const answers: IFormResponseAnswer[] = [];
+  const consumed = new Set<string>();
+
+  for (const fieldId of fieldOrder) {
+    const field = fields[fieldId];
+    if (!field || field.type === "label") continue;
+    const tag = tagsByField.get(fieldId);
+    if (!tag) continue;
+    consumed.add(fieldId);
+    answers.push({
+      fieldId,
+      label: plainText(field.labelHtml) || fieldId,
+      value: normalizeAnswerValue(field, tag[2], tag[3]),
+    });
+  }
+
+  for (const tag of responseTags) {
+    const fieldId = tag[1];
+    if (consumed.has(fieldId)) continue;
+    const field = fields[fieldId];
+    answers.push({
+      fieldId,
+      label: field ? plainText(field.labelHtml) || fieldId : fieldId,
+      value: normalizeAnswerValue(field, tag[2], tag[3]),
+    });
+  }
+
+  return {
+    submittedAt: response.created_at * 1000,
+    answers,
+  };
 }
 
 export function BookingFormRenderer({
   attachedForm,
   onStateChange,
 }: BookingFormRendererProps) {
-  const [loading, setLoading] = useState(true);
-  const [form, setForm] = useState<FormstrNormalizedForm | null>(null);
-  const [values, setValues] = useState<Record<string, BookingFormValue>>({});
-  const [error, setError] = useState<string | null>(null);
+  const intl = useIntl();
+  const { user } = useUser();
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [snapshot, setSnapshot] = useState<IFormResponseSnapshot>();
+  const [resolveError, setResolveError] = useState<string>();
+  const [resolvingSnapshot, setResolvingSnapshot] = useState(false);
+  const { status, refresh } = useFormSubmissionStatus(
+    attachedForm.naddr,
+    user?.pubkey,
+  );
 
-  useEffect(() => {
-    let cancelled = false;
+  const submittedAtLabel = useMemo(() => {
+    if (!snapshot?.submittedAt) return null;
+    return new Date(snapshot.submittedAt).toLocaleString();
+  }, [snapshot]);
 
-    setLoading(true);
-    setError(null);
-    setForm(null);
-    setValues({});
-    onStateChange({ loading: true, isComplete: false });
+  const resolveSnapshot = useCallback(
+    async (responseEvent: NostrEvent | null) => {
+      const formAddress = getFormAddress(attachedForm.naddr);
+      if (!formAddress || !user?.pubkey) {
+        setSnapshot(undefined);
+        return;
+      }
 
-    loadAttachedFormDefinition(attachedForm)
-      .then((nextForm) => {
-        if (cancelled) return;
+      setResolvingSnapshot(true);
+      setResolveError(undefined);
 
-        const unsupportedFields = getUnsupportedFormFields(nextForm);
-        if (unsupportedFields.length > 0) {
-          setError(
-            `This form contains unsupported field types: ${unsupportedFields
-              .map((field) => field.config.renderElement || field.type)
-              .join(", ")}`,
+      try {
+        const [form, event] = await Promise.all([
+          fetchAttachedFormCached<SdkForm>(attachedForm),
+          responseEvent
+            ? Promise.resolve(responseEvent)
+            : fetchUserFormResponse(
+                formAddress.coordinate,
+                user.pubkey,
+                formAddress.relayHints,
+              ),
+        ]);
+
+        if (!event) {
+          throw new Error(
+            intl.formatMessage({ id: "form.responseUnavailable" }),
           );
-          setLoading(false);
-          return;
         }
 
-        setForm(nextForm);
-        setLoading(false);
-      })
-      .catch((loadError) => {
-        if (cancelled) return;
-        setError(
-          loadError instanceof Error
-            ? loadError.message
-            : "We could not load the attached form.",
+        setSnapshot(buildSnapshotFromResponse(event, form));
+      } catch (error) {
+        console.error("[BookingFormRenderer] resolve snapshot failed", error);
+        setSnapshot(undefined);
+        setResolveError(
+          error instanceof Error
+            ? error.message
+            : intl.formatMessage({ id: "form.fetchError" }),
         );
-        setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [attachedForm, onStateChange]);
-
-  const missingFieldLabel = useMemo(() => {
-    if (!form) return null;
-    return validateBookingFormValues(form, values);
-  }, [form, values]);
+      } finally {
+        setResolvingSnapshot(false);
+      }
+    },
+    [attachedForm, intl, user?.pubkey],
+  );
 
   useEffect(() => {
-    if (loading) {
-      onStateChange({ loading: true, isComplete: false });
+    if (status.state === "submitted") {
+      void resolveSnapshot(status.event);
       return;
     }
 
-    if (error) {
-      onStateChange({ loading: false, isComplete: false, error });
+    if (status.state === "loading") {
+      setSnapshot(undefined);
+      setResolveError(undefined);
       return;
     }
 
-    if (!form) {
-      onStateChange({
-        loading: false,
-        isComplete: false,
-        error: "We could not load the attached form.",
-      });
+    if (status.state === "error") {
+      setSnapshot(undefined);
+      setResolveError(status.error);
       return;
     }
 
-    if (missingFieldLabel) {
-      onStateChange({
-        loading: false,
-        isComplete: false,
-        error: `Complete the required field: ${missingFieldLabel}`,
-      });
-      return;
-    }
+    setSnapshot(undefined);
+    setResolveError(undefined);
+  }, [resolveSnapshot, status]);
 
+  useEffect(() => {
+    const loading = status.state === "loading" || resolvingSnapshot;
+    const error =
+      resolveError || (status.state === "error" ? status.error : undefined);
     onStateChange({
-      loading: false,
-      isComplete: true,
-      snapshot: buildFormResponseSnapshot(form, values),
+      loading,
+      isComplete: Boolean(snapshot),
+      error,
+      snapshot,
     });
-  }, [error, form, loading, missingFieldLabel, onStateChange, values]);
-
-  if (loading) {
-    return (
-      <Paper variant="outlined" sx={{ p: 2 }}>
-        <Stack direction="row" spacing={1.5} alignItems="center">
-          <CircularProgress size={18} />
-          <Typography variant="body2">
-            Loading attached form…
-          </Typography>
-        </Stack>
-      </Paper>
-    );
-  }
-
-  if (error) {
-    return (
-      <Alert severity="error">
-        {error}
-      </Alert>
-    );
-  }
-
-  if (!form) {
-    return null;
-  }
-
-  const blocks = form.blocks?.length
-    ? form.blocks
-    : [
-        {
-          type: "section" as const,
-          id: "default",
-          questionIds: form.fieldOrder,
-          order: 0,
-        },
-      ];
+  }, [onStateChange, resolveError, resolvingSnapshot, snapshot, status]);
 
   return (
-    <Paper variant="outlined" sx={{ p: 2, backgroundColor: "background.default" }}>
-      <Stack spacing={2}>
-        <Box>
-          <Typography variant="subtitle1">
-            {getAttachedFormDisplayTitle(attachedForm)}
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Complete this form before requesting the booking.
-          </Typography>
-        </Box>
+    <>
+      <Paper variant="outlined" sx={{ p: 2 }}>
+        <Stack spacing={1.5}>
+          <Box>
+            <Typography variant="subtitle2">
+              {intl.formatMessage({ id: "form.fillTitle" })}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Complete the attached form before requesting this booking.
+            </Typography>
+          </Box>
 
-        {blocks.map((block) => {
-          if (block.type === "intro") {
-            return (
-              <Box key="intro">
-                {block.title ? (
-                  <Typography variant="h6" sx={{ mb: 0.5 }}>
-                    {block.title}
-                  </Typography>
-                ) : null}
-                {block.description ? (
-                  <Typography variant="body2" color="text.secondary">
-                    <Markdown remarkPlugins={[remarkGfm]}>
-                      {block.description}
-                    </Markdown>
-                  </Typography>
-                ) : null}
-              </Box>
-            );
-          }
+          <FormAttachmentRow
+            attachment={attachedForm}
+            onFill={() => setDialogOpen(true)}
+            showSubmissionStatus
+          />
 
-          return (
-            <Stack
-              key={block.id}
-              spacing={2}
-              sx={{
-                borderTop: "1px solid",
-                borderColor: "divider",
-                pt: 2,
-              }}
-            >
-              {block.title ? (
-                <Typography variant="subtitle2">{block.title}</Typography>
-              ) : null}
-              {block.description ? (
-                <Typography variant="body2" color="text.secondary">
-                  <Markdown remarkPlugins={[remarkGfm]}>
-                    {block.description}
-                  </Markdown>
+          {status.state === "loading" || resolvingSnapshot ? (
+            <Typography variant="body2" color="text.secondary">
+              Checking your form submission…
+            </Typography>
+          ) : null}
+
+          {resolveError ? <Alert severity="error">{resolveError}</Alert> : null}
+
+          {snapshot ? (
+            <Alert severity="success">
+              {intl.formatMessage({ id: "form.alreadySubmitted" })}
+            </Alert>
+          ) : null}
+
+          {snapshot?.answers?.length ? (
+            <Stack spacing={1}>
+              {submittedAtLabel ? (
+                <Typography variant="caption" color="text.secondary">
+                  Submitted {submittedAtLabel}
                 </Typography>
               ) : null}
-              {block.questionIds.map((fieldId) => {
-                const field = form.fields[fieldId];
-                if (!field) return null;
-
-                return (
-                  <FormField
-                    key={fieldId}
-                    field={field}
-                    value={values[fieldId] ?? null}
-                    onChange={(nextValue) =>
-                      setValues((current) => ({
-                        ...current,
-                        [fieldId]: nextValue,
-                      }))
-                    }
-                  />
-                );
-              })}
+              {snapshot.answers.map((answer) => (
+                <Box key={answer.fieldId}>
+                  <Typography variant="body2" fontWeight={600}>
+                    {answer.label}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {Array.isArray(answer.value)
+                      ? answer.value.join(", ")
+                      : answer.value == null
+                        ? intl.formatMessage({ id: "form.noAnswer" })
+                        : String(answer.value)}
+                  </Typography>
+                </Box>
+              ))}
             </Stack>
-          );
-        })}
+          ) : null}
+        </Stack>
+      </Paper>
 
-        {missingFieldLabel ? (
-          <Alert severity="info">
-            Complete the required field: {missingFieldLabel}
-          </Alert>
-        ) : null}
-      </Stack>
-    </Paper>
+      <FormFillerDialog
+        open={dialogOpen}
+        attachment={attachedForm}
+        onClose={() => setDialogOpen(false)}
+        onSubmitted={(event) => {
+          setDialogOpen(false);
+          void resolveSnapshot(event);
+          void refresh();
+        }}
+      />
+    </>
   );
 }

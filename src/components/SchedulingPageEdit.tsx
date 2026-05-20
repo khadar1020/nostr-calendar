@@ -40,7 +40,7 @@ import type {
 } from "../utils/types";
 import { ROUTES } from "../utils/routingHelper";
 import { useIntl } from "react-intl";
-import { resolveAttachedFormReference } from "../utils/bookingForms";
+import { buildFormstrUrl, parseFormInput } from "../utils/formLink";
 
 const DAY_NAMES = dayjs.weekdays();
 
@@ -102,7 +102,6 @@ type SchedulingFormData = Pick<
   eventTitle: string;
   image: string;
   formUrl: string;
-  formTitle: string;
 };
 
 const DEFAULT_FORM_DATA: SchedulingFormData = {
@@ -112,7 +111,6 @@ const DEFAULT_FORM_DATA: SchedulingFormData = {
   location: "",
   image: "",
   formUrl: "",
-  formTitle: "",
   slotDurations: [30],
   blockedDates: [],
   maxAdvance: 2592000,
@@ -206,8 +204,9 @@ export const SchedulingPageEdit = () => {
       description: existingPage.description,
       location: existingPage.location,
       image: existingPage.image || "",
-      formUrl: existingPage.attachedForm?.formUrl || "",
-      formTitle: existingPage.attachedForm?.formTitle || "",
+      formUrl: existingPage.attachedForm
+        ? buildFormstrUrl(existingPage.attachedForm)
+        : "",
       slotDurations:
         existingPage.slotDurations.length > 0
           ? existingPage.slotDurations
@@ -281,12 +280,13 @@ export const SchedulingPageEdit = () => {
   const handleSave = async () => {
     setProcessing(true);
     try {
-      const attachedForm = formData.formUrl.trim()
-        ? await resolveAttachedFormReference(
-            formData.formUrl,
-            formData.formTitle || undefined,
-          )
+      const trimmedFormUrl = formData.formUrl.trim();
+      const attachedForm = trimmedFormUrl
+        ? parseFormInput(trimmedFormUrl)
         : undefined;
+      if (trimmedFormUrl && !attachedForm) {
+        throw new Error("Please enter a valid Formstr form link or naddr");
+      }
       // Auto-detect the host's timezone from the browser. The host enters
       // availability windows like "09:00" thinking in their own local time;
       // storing that timezone alongside lets viewers in any other timezone
@@ -601,7 +601,6 @@ export const SchedulingPageEdit = () => {
                 color="inherit"
                 onClick={() => {
                   updateField("formUrl", "");
-                  updateField("formTitle", "");
                 }}
               >
                 Remove
@@ -616,15 +615,7 @@ export const SchedulingPageEdit = () => {
               value={formData.formUrl}
               onChange={(e) => updateField("formUrl", e.target.value)}
               size="small"
-            />
-            <TextField
-              fullWidth
-              label="Form label (optional)"
-              placeholder="Intake form"
-              value={formData.formTitle}
-              onChange={(e) => updateField("formTitle", e.target.value)}
-              size="small"
-              helperText="Used as a fallback if the form title cannot be fetched."
+              helperText="Paste a Formstr share link or a raw naddr."
             />
           </Box>
         </Paper>

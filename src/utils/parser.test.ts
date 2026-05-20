@@ -158,7 +158,9 @@ describe("nostrEventToCalendar", () => {
       ],
     });
     const result = nostrEventToCalendar(event);
-    expect(result.repeat.rrule).toBe("FREQ=DAILY;COUNT=5;UNTIL=20250430T100000Z");
+    expect(result.repeat.rrule).toBe(
+      "FREQ=DAILY;COUNT=5;UNTIL=20250430T100000Z",
+    );
   });
 
   it("sets repeat.rrule to null for non-recurring events", () => {
@@ -240,12 +242,10 @@ describe("nostrEventToCalendar", () => {
     expect(result.repeat.rrule).toBe("FREQ=DAILY");
   });
 
-  it("parses booking form metadata and form responses", () => {
+  it("parses attached forms and booking form responses", () => {
     const event = makeNostrEvent({
       tags: [
-        ["booking_form_id", "naddr1form"],
-        ["booking_form_title", "Intake form"],
-        ["booking_form_url", "https://formstr.app/f/naddr1form"],
+        ["form", "naddr1form", "view-key-1"],
         [
           "booking_form_response",
           JSON.stringify({
@@ -257,11 +257,7 @@ describe("nostrEventToCalendar", () => {
     });
 
     const result = nostrEventToCalendar(event);
-    expect(result.attachedForm).toEqual({
-      formId: "naddr1form",
-      formTitle: "Intake form",
-      formUrl: "https://formstr.app/f/naddr1form",
-    });
+    expect(result.forms).toEqual([{ naddr: "naddr1form", viewKey: "view-key-1" }]);
     expect(result.formResponse).toEqual({
       submittedAt: 1700000000000,
       answers: [{ fieldId: "q1", label: "Company", value: "Formstr" }],
@@ -279,17 +275,14 @@ describe("scheduling page form metadata", () => {
         ["duration_mode", "fixed"],
         ["timezone", "UTC"],
         ["slot_duration", "30"],
-        ["form_id", "naddr1form"],
-        ["form_title", "Intake form"],
-        ["form_url", "https://formstr.app/f/naddr1form"],
+        ["form", "naddr1form", "view-key-1"],
       ],
     });
 
     const page = nostrEventToSchedulingPage(event);
     expect(page.attachedForm).toEqual({
-      formId: "naddr1form",
-      formTitle: "Intake form",
-      formUrl: "https://formstr.app/f/naddr1form",
+      naddr: "naddr1form",
+      viewKey: "view-key-1",
     });
   });
 
@@ -312,18 +305,57 @@ describe("scheduling page form metadata", () => {
       location: "",
       createdAt: 1700000000,
       attachedForm: {
-        formId: "naddr1form",
-        formTitle: "Intake form",
-        formUrl: "https://formstr.app/f/naddr1form",
+        naddr: "naddr1form",
+        viewKey: "view-key-1",
       },
     };
 
     const tags = schedulingPageToTags(page);
-    expect(tags).toContainEqual(["form_id", "naddr1form"]);
-    expect(tags).toContainEqual(["form_title", "Intake form"]);
-    expect(tags).toContainEqual([
-      "form_url",
-      "https://formstr.app/f/naddr1form",
+    expect(tags).toContainEqual(["form", "naddr1form", "view-key-1"]);
+  });
+});
+
+describe("nostrEventToCalendar form tags", () => {
+  it("returns undefined forms when no form tag is present", () => {
+    const result = nostrEventToCalendar(makeNostrEvent());
+    expect(result.forms).toBeUndefined();
+  });
+
+  it("parses a form tag with naddr only", () => {
+    const result = nostrEventToCalendar(
+      makeNostrEvent({ tags: [["form", "naddr1abc"]] }),
+    );
+    expect(result.forms).toEqual([{ naddr: "naddr1abc" }]);
+  });
+
+  it("parses a form tag with naddr and viewKey", () => {
+    const result = nostrEventToCalendar(
+      makeNostrEvent({ tags: [["form", "naddr1abc", "key-1"]] }),
+    );
+    expect(result.forms).toEqual([
+      { naddr: "naddr1abc", viewKey: "key-1" },
     ]);
+  });
+
+  it("parses multiple form tags", () => {
+    const result = nostrEventToCalendar(
+      makeNostrEvent({
+        tags: [
+          ["form", "naddr1aaa"],
+          ["form", "naddr1bbb", "k2"],
+        ],
+      }),
+    );
+    expect(result.forms).toEqual([
+      { naddr: "naddr1aaa" },
+      { naddr: "naddr1bbb", viewKey: "k2" },
+    ]);
+  });
+
+  it("ignores empty-value form tags", () => {
+    const result = nostrEventToCalendar(
+      makeNostrEvent({ tags: [["form", ""]] }),
+    );
+    expect(result.forms).toBeUndefined();
   });
 });

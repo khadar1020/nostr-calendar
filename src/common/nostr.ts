@@ -61,6 +61,26 @@ export const getRelays = (): string[] => {
   return userRelays.length > 0 ? userRelays : defaultRelays;
 };
 
+const normalizeRelayList = (relays: string[]): string[] => {
+  const normalized = new Set<string>();
+  relays.forEach((url) => {
+    try {
+      normalized.add(normalizeURL(url));
+    } catch {
+      // Ignore malformed relay hints from external links.
+    }
+  });
+  return [...normalized];
+};
+
+const getDiscoveryRelays = (hintRelays: string[] = []): string[] => {
+  return normalizeRelayList([
+    ...hintRelays,
+    ...defaultRelays,
+    ...useRelayStore.getState().relays,
+  ]);
+};
+
 export async function getUserPublicKey() {
   const signer = await signerManager.getSigner();
   const pubKey = await signer.getPublicKey();
@@ -137,15 +157,13 @@ async function preparePrivateCalendarEvent(
     eventData.push(["notification", event.notificationPreference]);
   }
 
-  if (event.attachedForm?.formId) {
-    eventData.push(["booking_form_id", event.attachedForm.formId]);
-  }
-  if (event.attachedForm?.formTitle) {
-    eventData.push(["booking_form_title", event.attachedForm.formTitle]);
-  }
-  if (event.attachedForm?.formUrl) {
-    eventData.push(["booking_form_url", event.attachedForm.formUrl]);
-  }
+  event.forms?.forEach((form) => {
+    eventData.push([
+      "form",
+      form.naddr,
+      ...(form.viewKey ? [form.viewKey] : []),
+    ]);
+  });
   if (event.formResponse) {
     eventData.push([
       "booking_form_response",
@@ -825,6 +843,24 @@ export const fetchUserProfile = async (
     kinds: [0],
     authors: [pubkey],
   });
+};
+
+export const fetchUserFormResponse = async (
+  formCoordinate: string,
+  userPubkey: string,
+  extraRelays: string[] = [],
+): Promise<Event | null> => {
+  const relays = getDiscoveryRelays(extraRelays);
+  const events = await nostrRuntime.querySync(relays, {
+    kinds: [EventKinds.FormResponse],
+    authors: [userPubkey],
+    "#a": [formCoordinate],
+    limit: 1,
+  });
+  if (!events || events.length === 0) return null;
+  return events.reduce((latest, current) =>
+    current.created_at > latest.created_at ? current : latest,
+  );
 };
 
 export const fetchRelayList = async (pubkey: string): Promise<string[]> => {

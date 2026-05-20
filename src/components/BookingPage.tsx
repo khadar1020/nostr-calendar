@@ -57,8 +57,8 @@ import { nip44, getPublicKey } from "nostr-tools";
 import { hexToBytes } from "@noble/hashes/utils.js";
 import type { Event, Filter } from "nostr-tools";
 import type {
-  IAttachedFormRef,
   IFormResponseSnapshot,
+  IFormAttachment,
   ISchedulingPage,
   ITimeSlot,
   IOutgoingBooking,
@@ -97,7 +97,7 @@ async function sendBookingRequest({
   note: string;
   dTag: string;
   relayHints?: string[];
-  attachedForm?: IAttachedFormRef;
+  attachedForm?: IFormAttachment;
   formResponse?: IFormResponseSnapshot;
 }): Promise<Event> {
   const userPublicKey = await getUserPublicKey();
@@ -109,19 +109,20 @@ async function sendBookingRequest({
     ["note", note],
     ["d", dTag],
   ];
-  if (attachedForm?.formId) tags.push(["form_id", attachedForm.formId]);
-  if (attachedForm?.formTitle) tags.push(["form_title", attachedForm.formTitle]);
-  if (attachedForm?.formUrl) tags.push(["form_url", attachedForm.formUrl]);
+  if (attachedForm?.naddr) {
+    tags.push([
+      "form",
+      attachedForm.naddr,
+      ...(attachedForm.viewKey ? [attachedForm.viewKey] : []),
+    ]);
+  }
 
   const giftWrap = await nip59.wrapEvent(
     {
       pubkey: userPublicKey,
       created_at: Math.floor(Date.now() / 1000),
       kind: EventKinds.BookingRequestRumor,
-      content:
-        attachedForm || formResponse
-          ? JSON.stringify({ attachedForm, formResponse })
-          : "",
+      content: formResponse ? JSON.stringify({ formResponse }) : "",
       tags,
     },
     creatorPubkey,
